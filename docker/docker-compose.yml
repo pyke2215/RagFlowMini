@@ -1,0 +1,159 @@
+version: '3.8'
+
+services:
+  # MongoDB Service
+  mongodb:
+    image: mongo:7.0
+    container_name: ragflow_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-password}
+      MONGO_INITDB_DATABASE: ${MONGODB_DATABASE:-rag_db}
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - ragflow_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Service
+  redis:
+    image: redis:7-alpine
+    container_name: ragflow_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ragflow_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ollama Service (Optional - chỉ cần nếu dùng local LLM)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ragflow_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - ragflow_network
+    # Uncomment nếu có GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # RAG Flow Mini Application
+  ragflow_app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: ragflow_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Embedding Configuration
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
+      - EMBEDDING_CACHE_FOLDER=${EMBEDDING_CACHE_FOLDER:-/app/models}
+      
+      # LLM Configuration
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-llama3.2}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-http://ollama:11434/v1}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2000}
+      
+      # MongoDB Configuration
+      - MONGODB_URI=${MONGODB_URI:-mongodb://admin:password@mongodb:27017/rag_db?authSource=admin}
+      - MONGODB_HOST=${MONGODB_HOST:-mongodb}
+      - MONGODB_PORT=${MONGODB_PORT:-27017}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-rag_db}
+      - MONGODB_USERNAME=${MONGODB_USERNAME:-admin}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD:-password}
+      
+      # Redis Configuration
+      - REDIS_URI=${REDIS_URI:-redis://:${REDIS_PASSWORD:-}@redis:6379/0}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      
+      # ChromaDB Configuration
+      - CHROMADB_PATH=${CHROMADB_PATH:-/app/chroma_db}
+      
+      # Cache Configuration
+      - CACHE_CONTEXT_TTL=${CACHE_CONTEXT_TTL:-3600}
+    volumes:
+      - chromadb_data:/app/chroma_db
+      - model_cache:/app/models
+      - tmp_uploads:/app/tmp_uploads
+    networks:
+      - ragflow_network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # ollama:
+      #   condition: service_healthy  # Uncomment nếu dùng Ollama
+    # Uncomment nếu có GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+  redis_data:
+    driver: local
+  ollama_data:
+    driver: local
+  chromadb_data:
+    driver: local
+  model_cache:
+    driver: local
+  tmp_uploads:
+    driver: local
+
+networks:
+  ragflow_network:
+    driver: bridge
+
