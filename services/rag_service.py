@@ -225,6 +225,7 @@ class RAGService:
 - The context may be noisy or hard for humans to read, so rewrite and summarize it clearly.
 - Your tone must be polite, friendly, and helpful.
 - If the user query is just casual conversation or simple researching and does not require deep analysis, you may ignore the context and answer directly.
+- The language of the response is denpendent on the user's language input and must be vietnamese or english or both.
 - IMPORTANT: You MUST always structure your answer using the exact sections provided in the user message:
   - First section: '========Main Response========'
   - Second section (if requested): '========More Option========'
